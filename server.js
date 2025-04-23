@@ -16,7 +16,7 @@ app.use(cors());
 app.use(express.json());
 
 // MongoDB Connection
-mongoose.connect('mongodb://localhost:27017/cycle_booking', {
+mongoose.connect('mongodb+srv://jjohanapriscy05:t7EimGaZPTkdRtNS@cluster0.7z856ay.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0/cycle_booking', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected')).catch(err => console.error(err));
