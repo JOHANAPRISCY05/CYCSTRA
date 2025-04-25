@@ -26,9 +26,7 @@ const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   role: { type: String, enum: ['user', 'host'], required: true },
-  activeSession: { type: String, default: null },
-  captcha: { type: String, default: null },
-  captchaCreatedAt: { type: Date, default: null }
+  activeSession: { type: String, default: null } // Track active session
 });
 const User = mongoose.model('User', UserSchema);
 
@@ -64,15 +62,6 @@ const generateUniqueCode = () => {
     code += chars[Math.floor(Math.random() * chars.length)];
   }
   return code;
-};
-
-const generateCaptcha = () => {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-  let captcha = '';
-  for (let i = 0; i < 5; i++) {
-    captcha += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return captcha;
 };
 
 const calculateCost = (minutes) => {
@@ -116,59 +105,16 @@ app.post('/api/login', async (req, res) => {
     const user = await User.findOne({ email, role });
     if (!user) return res.status(400).json({ message: 'Invalid credentials' });
 
-    if (user.activeSession) {
-      const captcha = generateCaptcha();
-      user.captcha = captcha;
-      user.captchaCreatedAt = new Date();
-      await user.save();
-      return res.status(200).json({ message: 'CAPTCHA required', captcha, requiresCaptcha: true });
-    }
-
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
 
+    // Check for active session
+    if (user.activeSession) {
+      return res.status(403).json({ message: 'User already logged in elsewhere' });
+    }
+
     const token = jwt.sign({ id: user._id, role: user.role }, 'secret_key', { expiresIn: '1h' });
     user.activeSession = token;
-    user.captcha = null;
-    user.captchaCreatedAt = null;
-    await user.save();
-
-    res.json({ token, role, requiresCaptcha: false });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-app.post('/api/verify-captcha', async (req, res) => {
-  const { email, role, captcha } = req.body;
-  try {
-    const user = await User.findOne({ email, role });
-    if (!user) return res.status(400).json({ message: 'Invalid credentials' });
-
-    if (!user.activeSession) {
-      return res.status(400).json({ message: 'No active session. Please log in again.' });
-    }
-
-    if (!user.captcha || !user.captchaCreatedAt) {
-      return res.status(400).json({ message: 'CAPTCHA not generated' });
-    }
-
-    // Check if CAPTCHA is expired (e.g., 5 minutes)
-    const captchaAge = (new Date() - new Date(user.captchaCreatedAt)) / 1000 / 60;
-    if (captchaAge > 5) {
-      user.captcha = null;
-      user.captchaCreatedAt = null;
-      await user.save();
-      return res.status(400).json({ message: 'CAPTCHA expired. Please try again.' });
-    }
-
-    if (user.captcha !== captcha) {
-      return res.status(400).json({ message: 'Invalid CAPTCHA' });
-    }
-
-    const token = user.activeSession;
-    user.captcha = null;
-    user.captchaCreatedAt = null;
     await user.save();
 
     res.json({ token, role });
@@ -182,8 +128,6 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
     const user = await User.findById(req.user.id);
     if (user) {
       user.activeSession = null;
-      user.captcha = null;
-      user.captchaCreatedAt = null;
       await user.save();
       res.json({ message: 'Logged out successfully' });
     } else {
