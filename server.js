@@ -26,7 +26,7 @@ const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   role: { type: String, enum: ['user', 'host'], required: true },
-  activeToken: { type: String, default: null } // Track active session token
+  activeSession: { type: String, default: null } // Track active session
 });
 const User = mongoose.model('User', UserSchema);
 
@@ -108,18 +108,13 @@ app.post('/api/login', async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
 
-    // Check for existing active session
-    if (user.activeToken) {
-      try {
-        jwt.verify(user.activeToken, 'secret_key');
-        return res.status(403).json({ message: 'User already logged in elsewhere' });
-      } catch (err) {
-        // Token expired or invalid, allow new login
-      }
+    // Check for active session
+    if (user.activeSession) {
+      return res.status(403).json({ message: 'User already logged in elsewhere' });
     }
 
     const token = jwt.sign({ id: user._id, role: user.role }, 'secret_key', { expiresIn: '1h' });
-    user.activeToken = token;
+    user.activeSession = token;
     await user.save();
 
     res.json({ token, role });
@@ -132,10 +127,12 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
     if (user) {
-      user.activeToken = null;
+      user.activeSession = null;
       await user.save();
+      res.json({ message: 'Logged out successfully' });
+    } else {
+      res.status(404).json({ message: 'User not found' });
     }
-    res.json({ message: 'Logged out successfully' });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -188,7 +185,7 @@ app.post('/api/start-ride', authenticateToken, async (req, res) => {
     booking.startTime = new Date();
     await booking.save();
 
-    io.to(bookingId).emit('rideStarted', { bookingId, startTime: booking.startTime });
+    io.emit('rideStarted', { bookingId, startTime: booking.startTime });
     res.json({ message: 'Ride started' });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
@@ -221,7 +218,7 @@ app.post('/api/stop-ride', authenticateToken, async (req, res) => {
     });
     await rideHistory.save();
 
-    io.to(bookingId).emit('rideStopped', {
+    io.emit('rideStopped', {
       bookingId,
       duration: booking.duration,
       cost: booking.cost,
