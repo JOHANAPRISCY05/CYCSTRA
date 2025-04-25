@@ -25,7 +25,8 @@ mongoose.connect('mongodb+srv://jjohanapriscy05:t7EimGaZPTkdRtNS@cluster0.7z856a
 const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  role: { type: String, enum: ['user', 'host'], required: true }
+  role: { type: String, enum: ['user', 'host'], required: true },
+  activeToken: { type: String, default: null } // Track active session token
 });
 const User = mongoose.model('User', UserSchema);
 
@@ -107,8 +108,34 @@ app.post('/api/login', async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
 
+    // Check for existing active session
+    if (user.activeToken) {
+      try {
+        jwt.verify(user.activeToken, 'secret_key');
+        return res.status(403).json({ message: 'User already logged in elsewhere' });
+      } catch (err) {
+        // Token expired or invalid, allow new login
+      }
+    }
+
     const token = jwt.sign({ id: user._id, role: user.role }, 'secret_key', { expiresIn: '1h' });
+    user.activeToken = token;
+    await user.save();
+
     res.json({ token, role });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.post('/api/logout', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (user) {
+      user.activeToken = null;
+      await user.save();
+    }
+    res.json({ message: 'Logged out successfully' });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -161,7 +188,7 @@ app.post('/api/start-ride', authenticateToken, async (req, res) => {
     booking.startTime = new Date();
     await booking.save();
 
-    io.emit('rideStarted', { bookingId, startTime: booking.startTime });
+    io.to(bookingId).emit('rideStarted', { bookingId, startTime: booking.startTime });
     res.json({ message: 'Ride started' });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
@@ -194,7 +221,7 @@ app.post('/api/stop-ride', authenticateToken, async (req, res) => {
     });
     await rideHistory.save();
 
-    io.emit('rideStopped', {
+    io.to(bookingId).emit('rideStopped', {
       bookingId,
       duration: booking.duration,
       cost: booking.cost,
