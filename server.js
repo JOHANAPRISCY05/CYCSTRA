@@ -19,7 +19,7 @@ app.use(express.json());
 mongoose.connect('mongodb+srv://jjohanapriscy05:t7EimGaZPTkdRtNS@cluster0.7z856ay.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0/cycle_booking', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-}).then(() => console.log('MongoDB connected')).catch(err => console.error(err));
+}).then(() => console.log('MongoDB connected')).catch(err => console.error('MongoDB connection error:', err));
 
 // Models
 const UserSchema = new mongoose.Schema({
@@ -84,20 +84,30 @@ const authenticateToken = (req, res, next) => {
 // Routes
 app.post('/api/register-or-login', async (req, res) => {
   const { email, password, role } = req.body;
+  console.log(`Attempting login/register for email: ${email}, role: ${role}`);
   try {
     let user = await User.findOne({ email, role });
     if (!user) {
-      // Register new user if they don't exist
+      console.log(`User not found, registering new user: ${email}`);
       const hashedPassword = await bcrypt.hash(password, 10);
       user = new User({ email, password: hashedPassword, role });
       await user.save();
       console.log(`New user registered: ${email} with role ${role}`);
+    } else {
+      console.log(`User found: ${email}, verifying password`);
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        console.log(`Password mismatch for ${email}`);
+        return res.status(400).json({ message: 'Invalid credentials' });
+      }
     }
 
     const token = jwt.sign({ id: user._id, role: user.role }, 'secret_key', { expiresIn: '1h' });
+    console.log(`Token generated for ${email}: ${token}`);
     res.json({ token, role });
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    console.error(`Error in register-or-login: ${err.message}`);
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
