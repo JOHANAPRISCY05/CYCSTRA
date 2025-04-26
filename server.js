@@ -83,14 +83,17 @@ const authenticateToken = (req, res, next) => {
 };
 
 // Routes
-app.post('/api/login', async (req, res) => {
+app.post('/api/register-or-login', async (req, res) => {
   const { email, password, role } = req.body;
   try {
-    const user = await User.findOne({ email, role });
-    if (!user) return res.status(400).json({ message: 'Invalid credentials' });
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
+    let user = await User.findOne({ email, role });
+    if (!user) {
+      // Register new user if they don't exist
+      const hashedPassword = await bcrypt.hash(password, 10);
+      user = new User({ email, password: hashedPassword, role });
+      await user.save();
+      console.log(`New user registered: ${email} with role ${role}`);
+    }
 
     // Check for active session
     if (user.activeSession) {
