@@ -19,13 +19,14 @@ app.use(express.json());
 mongoose.connect('mongodb+srv://jjohanapriscy05:t7EimGaZPTkdRtNS@cluster0.7z856ay.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0/cycle_booking', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-}).then(() => console.log('MongoDB connected')).catch(err => console.error('MongoDB connection error:', err));
+}).then(() => console.log('MongoDB connected')).catch(err => console.error(err));
 
 // Models
 const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  role: { type: String, enum: ['user', 'host'], required: true }
+  role: { type: String, enum: ['user', 'host'], required: true },
+  activeSession: { type: String, default: null }
 });
 const User = mongoose.model('User', UserSchema);
 
@@ -82,40 +83,40 @@ const authenticateToken = (req, res, next) => {
 };
 
 // Routes
-app.post('/api/register-or-login', async (req, res) => {
+app.post('/api/register', async (req, res) => {
   const { email, password, role } = req.body;
-  console.log(`Attempting login/register for email: ${email}, role: ${role}`);
   try {
-    let user = await User.findOne({ email, role });
-    if (!user) {
-      console.log(`User not found, registering new user: ${email}`);
-      const hashedPassword = await bcrypt.hash(password, 10);
-      user = new User({ email, password: hashedPassword, role });
-      await user.save();
-      console.log(`New user registered: ${email} with role ${role}`);
-    } else {
-      console.log(`User found: ${email}, verifying password`);
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        console.log(`Password mismatch for ${email}`);
-        return res.status(400).json({ message: 'Invalid credentials' });
-      }
-    }
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(400).json({ message: 'User already exists' });
 
-    const token = jwt.sign({ id: user._id, role: user.role }, 'secret_key', { expiresIn: '1h' });
-    console.log(`Token generated for ${email}: ${token}`);
-    res.json({ token, role });
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = new User({ email, password: hashedPassword, role });
+    await user.save();
+
+    res.status(201).json({ message: 'User registered successfully' });
   } catch (err) {
-    console.error(`Error in register-or-login: ${err.message}`);
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
-app.get('/api/verify-token', authenticateToken, async (req, res) => {
+app.post('/api/login', async (req, res) => {
+  const { email, password, role } = req.body;
   try {
-    const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    res.json({ role: user.role });
+    const user = await User.findOne({ email, role });
+    if (!user) return res.status(400).json({ message: 'Invalid credentials' });
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
+
+    if (user.activeSession) {
+      return res.status(403).json({ message: 'User already logged in elsewhere' });
+    }
+
+    const token = jwt.sign({ id: user._id, role: user.role }, 'secret_key', { expiresIn: '1h' });
+    user.activeSession = token;
+    await user.save();
+
+    res.json({ token, role });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -125,6 +126,8 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
     if (user) {
+      user.activeSession = null;
+      await user.save();
       res.json({ message: 'Logged out successfully' });
     } else {
       res.status(404).json({ message: 'User not found' });
@@ -166,6 +169,18 @@ app.get('/api/bookings', authenticateToken, async (req, res) => {
   }
 });
 
+app.get('/api/cycle-availability', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'user') return res.status(403).json({ message: 'Unauthorized' });
+
+  try {
+    const activeBookings = await Booking.find({ stopped: false });
+    const bookedCycles = activeBookings.map(booking => booking.cycle);
+    res.json({ bookedCycles });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 app.post('/api/start-ride', authenticateToken, async (req, res) => {
   if (req.user.role !== 'host') return res.status(403).json({ message: 'Unauthorized' });
 
@@ -201,7 +216,7 @@ app.post('/api/stop-ride', authenticateToken, async (req, res) => {
 
     booking.stopped = true;
     booking.endTime = new Date();
-    booking.duration = Math.floor((booking.endTime - booking.startTime) / 60000); // in minutes
+    booking.duration = Math.floor((booking.endTime - booking.startTime) / 60000);
     booking.cost = calculateCost(booking.duration);
     booking.dropLocation = dropLocation;
     await booking.save();
