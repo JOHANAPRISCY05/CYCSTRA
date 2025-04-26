@@ -25,8 +25,7 @@ mongoose.connect('mongodb+srv://jjohanapriscy05:t7EimGaZPTkdRtNS@cluster0.7z856a
 const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  role: { type: String, enum: ['user', 'host'], required: true },
-  activeSession: { type: String, default: null } // Track active session
+  role: { type: String, enum: ['user', 'host'], required: true }
 });
 const User = mongoose.model('User', UserSchema);
 
@@ -95,16 +94,18 @@ app.post('/api/register-or-login', async (req, res) => {
       console.log(`New user registered: ${email} with role ${role}`);
     }
 
-    // Check for active session
-    if (user.activeSession) {
-      return res.status(403).json({ message: 'User already logged in elsewhere' });
-    }
-
     const token = jwt.sign({ id: user._id, role: user.role }, 'secret_key', { expiresIn: '1h' });
-    user.activeSession = token;
-    await user.save();
-
     res.json({ token, role });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.get('/api/verify-token', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json({ role: user.role });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -114,8 +115,6 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
     if (user) {
-      user.activeSession = null;
-      await user.save();
       res.json({ message: 'Logged out successfully' });
     } else {
       res.status(404).json({ message: 'User not found' });
