@@ -25,7 +25,9 @@ mongoose.connect('mongodb+srv://jjohanapriscy05:t7EimGaZPTkdRtNS@cluster0.7z856a
 const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  role: { type: String, enum: ['user', 'host'], required: true }
+  role: { type: String, enum: ['user', 'host'], required: true },
+  resetToken: String,
+  resetTokenExpires: Date
 });
 const User = mongoose.model('User', UserSchema);
 
@@ -63,6 +65,15 @@ const generateUniqueCode = () => {
   return code;
 };
 
+const generateResetToken = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let token = '';
+  for (let i = 0; i < 32; i++) {
+    token += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return token;
+};
+
 const calculateCost = (minutes) => {
   if (minutes <= 15) return 10;
   if (minutes <= 30) return 20;
@@ -89,10 +100,9 @@ app.post('/api/register-or-login', async (req, res) => {
     return res.status(400).json({ message: 'Missing required fields' });
   }
 
-  // Validate email format: 9 digits followed by @sastra.ac.in
   const emailRegex = /^\d{9}@sastra\.ac\.in$/;
   if (!emailRegex.test(email.toLowerCase())) {
-    return res.status(400).json({ message: 'Email must be a 9-digit number followed by @sastra.ac.in' });
+    return res.status(400).json({ message: 'Email must be a 9-digit number followed by @sastra.ac.in (e.g., 127156061@sastra.ac.in)' });
   }
 
   try {
@@ -111,7 +121,7 @@ app.post('/api/register-or-login', async (req, res) => {
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
         console.log(`Password mismatch for ${email}`);
-        return res.status(400).json({ message: 'Invalid credentials' });
+        return res.status(401).json({ message: 'Incorrect password. Please try again.' });
       }
     }
 
@@ -147,7 +157,6 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
   }
 });
 
-// New endpoint to check cycle availability for a place
 app.get('/api/cycle-availability', async (req, res) => {
   const { place } = req.query;
   if (!place) {
@@ -179,7 +188,6 @@ app.post('/api/book', authenticateToken, async (req, res) => {
 
   const { place, cycle } = req.body;
   try {
-    // Check if the cycle is already in use
     const activeBooking = await Booking.findOne({
       place: place,
       cycle: cycle,
@@ -254,7 +262,7 @@ app.post('/api/stop-ride', authenticateToken, async (req, res) => {
 
     booking.stopped = true;
     booking.endTime = new Date();
-    booking.duration = Math.floor((booking.endTime - booking.startTime) / 60000); // in minutes
+    booking.duration = Math.floor((booking.endTime - booking.startTime) / 60000);
     booking.cost = calculateCost(booking.duration);
     booking.dropLocation = dropLocation;
     await booking.save();
@@ -288,6 +296,59 @@ app.get('/api/ride-history', authenticateToken, async (req, res) => {
     res.json(history);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.post('/api/request-reset-token', async (req, res) => {
+  const { email, role } = req.body;
+  if (!email || !role) {
+    return res.status(400).json({ message: 'Email and role are required' });
+  }
+
+  const emailRegex = /^\d{9}@sastra\.ac\.in$/;
+  if (!emailRegex.test(email.toLowerCase())) {
+    return res.status(400).json({ message: 'Email must be a 9-digit number followed by @sastra.ac.in' });
+  }
+
+  try {
+    const user = await User.findOne({ email, role });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const resetToken = generateResetToken();
+    user.resetToken = resetToken;
+    user.resetTokenExpires = Date.now() + 3600000; // 1 hour expiration
+    await user.save();
+
+    res.json({ message: 'Reset token generated', token: resetToken });
+    console.log(`Reset token for ${email}: ${resetToken}`);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+app.post('/api/reset-password', async (req, res) => {
+  const { email, token, newPassword, role } = req.body;
+  if (!email || !token || !newPassword || !role) {
+    return res.status(400).json({ message: 'All fields are required' });
+  }
+
+  try {
+    const user = await User.findOne({ email, role });
+    if (!user || user.resetToken !== token || user.resetTokenExpires < Date.now()) {
+      return res.status(400).json({ message: 'Invalid or expired token' });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.password = hashedPassword;
+    user.resetToken = undefined;
+    user.resetTokenExpires = undefined;
+    await user.save();
+
+    res.json({ message: 'Password reset successful' });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
