@@ -91,7 +91,7 @@ app.post('/api/register-or-login', async (req, res) => {
 
   const emailRegex = /^\d{9}@sastra\.ac\.in$/;
   if (!emailRegex.test(email.toLowerCase())) {
-    return res.status(400).json({ message: 'Email must be a sastra email id' });
+    return res.status(400).json({ message: 'Email must be a 9-digit number followed by @sastra.ac.in (e.g., 127156061@sastra.ac.in)' });
   }
 
   try {
@@ -296,7 +296,7 @@ app.post('/api/reset-password', async (req, res) => {
 
   const emailRegex = /^\d{9}@sastra\.ac\.in$/;
   if (!emailRegex.test(email.toLowerCase())) {
-    return res.status(400).json({ message: 'Email must be a 9-digit number followed by @sastra.ac.in' });
+    return res.status(400).json({ message: 'Email must be a sastra email id' });
   }
 
   try {
@@ -317,7 +317,7 @@ app.post('/api/reset-password', async (req, res) => {
 
 // Socket.IO for Real-Time Updates
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id');
+  console.log('Client connected:', socket.id);
 
   socket.on('joinRide', (bookingId) => {
     socket.join(bookingId);
