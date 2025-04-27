@@ -25,9 +25,7 @@ mongoose.connect('mongodb+srv://jjohanapriscy05:t7EimGaZPTkdRtNS@cluster0.7z856a
 const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  role: { type: String, enum: ['user', 'host'], required: true },
-  resetToken: String,
-  resetTokenExpires: Date
+  role: { type: String, enum: ['user', 'host'], required: true }
 });
 const User = mongoose.model('User', UserSchema);
 
@@ -65,15 +63,6 @@ const generateUniqueCode = () => {
   return code;
 };
 
-const generateResetToken = () => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let token = '';
-  for (let i = 0; i < 32; i++) {
-    token += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return token;
-};
-
 const calculateCost = (minutes) => {
   if (minutes <= 15) return 10;
   if (minutes <= 30) return 20;
@@ -102,7 +91,7 @@ app.post('/api/register-or-login', async (req, res) => {
 
   const emailRegex = /^\d{9}@sastra\.ac\.in$/;
   if (!emailRegex.test(email.toLowerCase())) {
-    return res.status(400).json({ message: 'Email must be a sastra email id' });
+    return res.status(400).json({ message: 'Email must be a 9-digit number followed by @sastra.ac.in (e.g., 127156061@sastra.ac.in)' });
   }
 
   try {
@@ -299,10 +288,10 @@ app.get('/api/ride-history', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/request-reset-token', async (req, res) => {
-  const { email, role } = req.body;
-  if (!email || !role) {
-    return res.status(400).json({ message: 'Email and role are required' });
+app.post('/api/reset-password', async (req, res) => {
+  const { email, newPassword, role } = req.body;
+  if (!email || !newPassword || !role) {
+    return res.status(400).json({ message: 'Email, new password, and role are required' });
   }
 
   const emailRegex = /^\d{9}@sastra\.ac\.in$/;
@@ -316,34 +305,8 @@ app.post('/api/request-reset-token', async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const resetToken = generateResetToken();
-    user.resetToken = resetToken;
-    user.resetTokenExpires = Date.now() + 3600000; // 1 hour expiration
-    await user.save();
-
-    res.json({ message: 'Reset token generated', token: resetToken });
-    console.log(`Reset token for ${email}: ${resetToken}`);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
-  }
-});
-
-app.post('/api/reset-password', async (req, res) => {
-  const { email, token, newPassword, role } = req.body;
-  if (!email || !token || !newPassword || !role) {
-    return res.status(400).json({ message: 'All fields are required' });
-  }
-
-  try {
-    const user = await User.findOne({ email, role });
-    if (!user || user.resetToken !== token || user.resetTokenExpires < Date.now()) {
-      return res.status(400).json({ message: 'Invalid or expired token' });
-    }
-
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     user.password = hashedPassword;
-    user.resetToken = undefined;
-    user.resetTokenExpires = undefined;
     await user.save();
 
     res.json({ message: 'Password reset successful' });
@@ -354,7 +317,7 @@ app.post('/api/reset-password', async (req, res) => {
 
 // Socket.IO for Real-Time Updates
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  console.log('Client connected:', socket.id');
 
   socket.on('joinRide', (bookingId) => {
     socket.join(bookingId);
