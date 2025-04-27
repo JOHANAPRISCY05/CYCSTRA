@@ -88,6 +88,13 @@ app.post('/api/register-or-login', async (req, res) => {
   if (!email || !password || !role) {
     return res.status(400).json({ message: 'Missing required fields' });
   }
+
+  // Validate email format: 9 digits followed by @sastra.ac.in
+  const emailRegex = /^\d{9}@sastra\.ac\.in$/;
+  if (!emailRegex.test(email.toLowerCase())) {
+    return res.status(400).json({ message: 'Email must be a 9-digit number followed by @sastra.ac.in' });
+  }
+
   try {
     let user = await User.findOne({ email, role });
     if (!user) {
@@ -140,11 +147,50 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
   }
 });
 
+// New endpoint to check cycle availability for a place
+app.get('/api/cycle-availability', async (req, res) => {
+  const { place } = req.query;
+  if (!place) {
+    return res.status(400).json({ message: 'Place is required' });
+  }
+
+  try {
+    const activeBookings = await Booking.find({
+      place: place,
+      started: true,
+      stopped: false,
+    });
+
+    const cyclesInUse = activeBookings.map(booking => booking.cycle);
+    const allCycles = ["Cycle 1", "Cycle 2", "Cycle 3"];
+    const availability = allCycles.map(cycle => ({
+      cycle: cycle,
+      available: !cyclesInUse.includes(cycle),
+    }));
+
+    res.json(availability);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
 app.post('/api/book', authenticateToken, async (req, res) => {
   if (req.user.role !== 'user') return res.status(403).json({ message: 'Unauthorized' });
 
   const { place, cycle } = req.body;
   try {
+    // Check if the cycle is already in use
+    const activeBooking = await Booking.findOne({
+      place: place,
+      cycle: cycle,
+      started: true,
+      stopped: false,
+    });
+
+    if (activeBooking) {
+      return res.status(400).json({ message: `Cycle ${cycle} at ${place} is currently in use` });
+    }
+
     const uniqueCode = generateUniqueCode();
     const booking = new Booking({
       userId: req.user.id,
@@ -188,6 +234,7 @@ app.post('/api/start-ride', authenticateToken, async (req, res) => {
     await booking.save();
 
     io.emit('rideStarted', { bookingId, startTime: booking.startTime });
+    io.emit('cycleStatusUpdate', { place: booking.place, cycle: booking.cycle, available: false });
     res.json({ message: 'Ride started' });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
@@ -226,6 +273,7 @@ app.post('/api/stop-ride', authenticateToken, async (req, res) => {
       cost: booking.cost,
       dropLocation
     });
+    io.emit('cycleStatusUpdate', { place: booking.place, cycle: booking.cycle, available: true });
     res.json({ message: 'Ride stopped', duration: booking.duration, cost: booking.cost });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
