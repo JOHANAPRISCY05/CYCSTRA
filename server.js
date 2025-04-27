@@ -165,23 +165,10 @@ app.get('/api/bookings', authenticateToken, async (req, res) => {
   if (req.user.role !== 'host') return res.status(403).json({ message: 'Unauthorized' });
 
   try {
-    // Fetch bookings and populate userId, handle cases where userId is invalid
-    const bookings = await Booking.find({ stopped: false })
-      .populate('userId', 'email')
-      .lean(); // Convert to plain JavaScript object for easier manipulation
-
-    // Filter out bookings with invalid userId and map email
-    const filteredBookings = bookings
-      .filter(booking => booking.userId != null) // Remove bookings with null userId
-      .map(booking => ({
-        ...booking,
-        userEmail: booking.userId?.email || 'Unknown User', // Fallback email
-      }));
-
-    res.json(filteredBookings);
+    const bookings = await Booking.find({ stopped: false }).populate('userId', 'email');
+    res.json(bookings);
   } catch (err) {
-    console.error(`Error in /api/bookings: ${err.message}`);
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
